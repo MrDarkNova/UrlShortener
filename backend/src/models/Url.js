@@ -1,1 +1,16 @@
-const a0_0x24e29e=a0_0x2f75;function a0_0x2f75(_0x31b585,_0x3899b7){_0x31b585=_0x31b585-0x1ce;const _0xb4cb7f=a0_0x4a49();let _0x4a2150=_0xb4cb7f[_0x31b585];return _0x4a2150;}(function(_0xd0f88b,_0x3aca88){const _0x587a59=a0_0x2f75,_0x29b06e=_0xd0f88b();while(!![]){try{const _0xaf2ec9=parseInt(_0x587a59(0x1df))/0x1*(parseInt(_0x587a59(0x1d5))/0x2)+-parseInt(_0x587a59(0x1d7))/0x3*(parseInt(_0x587a59(0x1dc))/0x4)+-parseInt(_0x587a59(0x1d4))/0x5*(-parseInt(_0x587a59(0x1dd))/0x6)+parseInt(_0x587a59(0x1cf))/0x7+-parseInt(_0x587a59(0x1d1))/0x8+parseInt(_0x587a59(0x1db))/0x9+-parseInt(_0x587a59(0x1d8))/0xa;if(_0xaf2ec9===_0x3aca88)break;else _0x29b06e['push'](_0x29b06e['shift']());}catch(_0x4c4328){_0x29b06e['push'](_0x29b06e['shift']());}}}(a0_0x4a49,0xd5c55));const a0_0x4cea08=(function(){let _0x519fef=!![];return function(_0x3ead8c,_0x566268){const _0xbe94d3=_0x519fef?function(){const _0x249e5a=a0_0x2f75;if(_0x566268){const _0x3abea5=_0x566268[_0x249e5a(0x1d0)](_0x3ead8c,arguments);return _0x566268=null,_0x3abea5;}}:function(){};return _0x519fef=![],_0xbe94d3;};}()),a0_0x4a2150=a0_0x4cea08(this,function(){const _0x40cf44=a0_0x2f75;return a0_0x4a2150[_0x40cf44(0x1d3)]()[_0x40cf44(0x1da)](_0x40cf44(0x1d2))[_0x40cf44(0x1d3)]()[_0x40cf44(0x1e0)](a0_0x4a2150)[_0x40cf44(0x1da)]('(((.+)+)+)+$');});a0_0x4a2150();const mongoose=require(a0_0x24e29e(0x1de)),urlSchema=new mongoose[(a0_0x24e29e(0x1e1))]({'originalUrl':{'type':String,'required':!![],'trim':!![]},'shortCode':{'type':String,'required':!![],'unique':!![],'index':!![]},'customAlias':{'type':String,'default':null},'clicks':{'type':Number,'default':0x0},'clickData':[{'timestamp':{'type':Date,'default':Date[a0_0x24e29e(0x1d9)]},'referrer':String,'userAgent':String}],'expiresAt':{'type':Date,'default':null},'isActive':{'type':Boolean,'default':!![]},'createdAt':{'type':Date,'default':Date[a0_0x24e29e(0x1d9)]}});urlSchema[a0_0x24e29e(0x1d6)]({'expiresAt':0x1},{'expireAfterSeconds':0x0,'partialFilterExpression':{'expiresAt':{'$ne':null}}}),module['exports']=mongoose['model'](a0_0x24e29e(0x1ce),urlSchema);function a0_0x4a49(){const _0x347ecc=['35StgLED','1381406wSlbvP','index','3yNVhvp','13924380DWDmZf','now','search','12818772oYGqyN','5610184xTUNZL','1130148kysOjP','mongoose','1kgIMHs','constructor','Schema','Url','7563605GAOysb','apply','6747544kfHNma','(((.+)+)+)+$','toString'];a0_0x4a49=function(){return _0x347ecc;};return a0_0x4a49();}
+const mongoose = require('mongoose');
+
+const urlSchema = new mongoose.Schema({
+  originalUrl: { type: String, required: true, trim: true },
+  shortCode: { type: String, required: true, unique: true, index: true },
+  customAlias: { type: String, default: null },
+  clicks: { type: Number, default: 0 },
+  clickData: [{ timestamp: { type: Date, default: Date.now }, referrer: String, userAgent: String }],
+  expiresAt: { type: Date, default: null },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+});
+
+urlSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { expiresAt: { $ne: null } } });
+
+module.exports = mongoose.model('Url', urlSchema);
