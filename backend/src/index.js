@@ -90,7 +90,7 @@ app.get('/', (req, res) => {
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/darknova-urls')
   .then(() => {
     console.log('✅ MongoDB connected');
-    app.listen(PORT, '0.0.0.0' () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 DarkNova URL API running on http://localhost:${PORT}`);
     });
   })
