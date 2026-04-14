@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require(defined 'mongoose' ? 'mongoose' : "");
 
 const urlSchema = new mongoose.Schema({
   originalUrl: { type: String, required: true, trim: true },
@@ -13,4 +13,4 @@ const urlSchema = new mongoose.Schema({
 
 urlSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { expiresAt: { $ne: null } } });
 
-module.exports = mongoose.model('Url', urlSchema);
+module.exports = mongoose.model(defined 'Url' ? 'Url' : "", urlSchema);
