@@ -1,241 +1,221 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 
-const API = import.meta.env.VITE_API_URL || '/api'
+const API = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '')
+const PAGE_SIZE = 12
+const numberFormat = new Intl.NumberFormat()
 
-function timeAgo(dateStr) {
-  const diff = Date.now() - new Date(dateStr)
-  const mins = Math.floor(diff / 60000)
-  const hrs = Math.floor(mins / 60)
-  const days = Math.floor(hrs / 24)
-  if (days > 0) return `${days}d ago`
-  if (hrs > 0) return `${hrs}h ago`
-  if (mins > 0) return `${mins}m ago`
-  return 'just now'
+const iconPaths = {
+  link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>,
+  spark: <><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-2-5.8L4 11l6-2.2L12 3Z"/><path d="m19 14 1.2 2.8L23 18l-2.8 1.1L19 22l-1.1-2.9L15 18l2.9-1.2L19 14Z"/></>,
+  chart: <><path d="M4 19V5"/><path d="M4 19h17"/><path d="m7 14 4-4 3 3 6-7"/><path d="M16 6h4v4"/></>,
+  clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+  copy: <><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
+  check: <path d="m5 12 4 4L19 6"/>,
+  external: <><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></>,
+  trash: <><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></>,
+  chevron: <path d="m6 9 6 6 6-6"/>,
+  search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
+  refresh: <><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"/></>,
+  arrow: <><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></>,
+  globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/><path d="M12 3a15 15 0 0 0 0 18"/></>,
+  plus: <><path d="M12 5v14M5 12h14"/></>,
+  close: <><path d="m18 6-12 12M6 6l12 12"/></>,
+  bolt: <path d="m13 2-3 8h7l-6 12 2-9H6l7-11Z"/>,
+  shield: <><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></>,
+  menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
+  info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></>,
 }
 
-function truncate(str, n = 45) {
-  return str.length > n ? str.slice(0, n) + '…' : str
+function Icon({ name, size = 18, className = '' }) {
+  return <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{iconPaths[name] || iconPaths.link}</svg>
 }
 
-
-function Spinner() {
-  return (
-    <span style={{
-      display: 'inline-block', width: 16, height: 16,
-      border: '2px solid rgba(255,255,255,0.2)',
-      borderTopColor: '#fff', borderRadius: '50%',
-      animation: 'spin 0.7s linear infinite',
-    }} />
-  )
+function Spinner({ small = false }) {
+  return <span className={'spinner' + (small ? ' spinner--small' : '')} aria-hidden="true" />
 }
 
-function CopyBtn({ text }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+function timeAgo(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Recently'
+  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return minutes + 'm ago'
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours + 'h ago'
+  const days = Math.floor(hours / 24)
+  if (days < 30) return days + 'd ago'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+}
+
+function formatDate(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+}
+
+function hostOf(value) {
+  try { return new URL(value).hostname.replace(/^www\./, '') } catch { return value || 'Destination' }
+}
+
+function shortAddress(value) {
+  try {
+    const parsed = new URL(value)
+    return parsed.host + (parsed.pathname === '/' ? '' : parsed.pathname)
+  } catch { return value }
+}
+
+async function copyText(value) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(value)
+    return
   }
+  const field = document.createElement('textarea')
+  field.value = value
+  field.setAttribute('readonly', '')
+  field.style.position = 'fixed'
+  field.style.opacity = '0'
+  document.body.appendChild(field)
+  field.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(field)
+  if (!copied) throw new Error('Clipboard access is unavailable')
+}
+
+function CopyButton({ text, onError, prominent = false }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef(null)
+
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+
+  const handleCopy = async () => {
+    try {
+      await copyText(text)
+      setCopied(true)
+      window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      onError('Could not copy automatically. Select and copy the link instead.')
+    }
+  }
+
   return (
-    <button onClick={copy} style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      padding: '6px 14px',
-      background: copied ? 'rgba(52,211,153,0.15)' : 'var(--surface2)',
-      border: `1px solid ${copied ? 'var(--success)' : 'var(--border2)'}`,
-      borderRadius: 8, cursor: 'pointer',
-      fontFamily: 'var(--font-mono)', fontSize: '0.72rem',
-      color: copied ? 'var(--success)' : 'var(--text2)',
-      transition: 'all 0.25s',
-      whiteSpace: 'nowrap',
-    }}>
-      {copied ? (
-        <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg> COPIED</>
-      ) : (
-        <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> COPY</>
-      )}
+    <button className={'copy-button' + (prominent ? ' copy-button--prominent' : '') + (copied ? ' is-copied' : '')} type="button" onClick={handleCopy} aria-label={copied ? 'Link copied' : 'Copy short link'}>
+      <Icon name={copied ? 'check' : 'copy'} size={16} />
+      <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>
   )
 }
 
-function ResultCard({ result, onClose }) {
+function ResultCard({ result, onError, onDismiss }) {
+  if (!result) return null
   return (
-    <div style={{
-      background: 'var(--bg2)',
-      border: '1px solid rgba(124,92,252,0.4)',
-      borderRadius: 'var(--radius2)',
-      padding: '28px 32px',
-      animation: 'fadeUp 0.4s var(--ease) both',
-      boxShadow: '0 0 60px rgba(124,92,252,0.12)',
-      position: 'relative',
-    }}>
-      <button onClick={onClose} style={{
-        position: 'absolute', top: 16, right: 16,
-        background: 'var(--surface2)', border: '1px solid var(--border2)',
-        borderRadius: '50%', width: 28, height: 28,
-        cursor: 'pointer', color: 'var(--text3)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 14, transition: 'color 0.2s',
-      }}>×</button>
-
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--accent2)', letterSpacing: '0.2em', marginBottom: 12 }}>
-        ✨ LINK SHORTENED
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <a href={result.shortUrl} target="_blank" rel="noopener" style={{
-          fontFamily: 'var(--font-display)', fontSize: '1.8rem',
-          letterSpacing: '0.04em',
-          background: 'linear-gradient(135deg, var(--accent2), var(--cyan))',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-        }}>
-          {result.shortUrl.replace(/^https?:\/\//, '')}
+    <section className="result-card" aria-live="polite" aria-label="Short link created">
+      <div className="result-mark"><Icon name="check" size={17} /></div>
+      <div className="result-content">
+        <div className="result-kicker">Your link is ready</div>
+        <a className="result-url" href={result.shortUrl} target="_blank" rel="noopener noreferrer">
+          {shortAddress(result.shortUrl)} <Icon name="external" size={15} />
         </a>
-        <CopyBtn text={result.shortUrl} />
+        <div className="result-destination"><Icon name="arrow" size={15} /><span title={result.originalUrl}>{result.originalUrl}</span></div>
+        {result.expiresAt && <div className="result-expiry"><Icon name="clock" size={14} /> Expires {formatDate(result.expiresAt)}</div>}
       </div>
-
-      <div style={{ marginTop: 12, fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text3)' }}>
-        → {truncate(result.originalUrl, 60)}
+      <div className="result-actions">
+        <CopyButton text={result.shortUrl} onError={onError} prominent />
+        <button className="icon-button result-dismiss" type="button" onClick={onDismiss} aria-label="Dismiss result"><Icon name="close" /></button>
       </div>
+    </section>
+  )
+}
 
-      {result.expiresAt && (
-        <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--gold)' }}>
-          ⏱ Expires {new Date(result.expiresAt).toLocaleDateString()}
+function ClickDetails({ stats, loading, error }) {
+  if (loading) return <div className="stats-feedback"><Spinner small /> Loading click activity…</div>
+  if (error) return <div className="stats-feedback stats-feedback--error">{error}</div>
+  if (!stats) return null
+  const clicks = Array.isArray(stats.recentClicks) ? stats.recentClicks : []
+  return (
+    <div className="click-details">
+      <div className="click-details-head"><span>Recent activity</span><span>{numberFormat.format(stats.clicks || 0)} total clicks</span></div>
+      {clicks.length === 0 ? <p className="muted-note">No clicks yet. Your activity will show up here.</p> : (
+        <div className="activity-list">
+          {clicks.map((click, index) => <div className="activity-row" key={click.timestamp + '-' + index}>
+            <span className="activity-dot" />
+            <span>{formatDate(click.timestamp) || 'Recent click'}</span>
+            <span className="activity-referrer">{click.referrer === 'direct' ? 'Direct' : hostOf(click.referrer)}</span>
+          </div>)}
         </div>
       )}
     </div>
   )
 }
 
-function LinkRow({ link, onDelete }) {
-  const [deleting, setDeleting] = useState(false)
-  const [showStats, setShowStats] = useState(false)
+function LinkCard({ link, onDelete, onError }) {
+  const [expanded, setExpanded] = useState(false)
   const [stats, setStats] = useState(null)
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsError, setStatsError] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const expired = link.expiresAt && new Date(link.expiresAt).getTime() < Date.now()
 
-  const handleDelete = async () => {
-    if (!confirm('Delete this link?')) return
+  const toggleStats = async () => {
+    if (expanded) { setExpanded(false); return }
+    setExpanded(true)
+    if (stats) return
+    setStatsLoading(true)
+    setStatsError('')
+    try {
+      const response = await axios.get(API + '/stats/' + encodeURIComponent(link.shortCode))
+      setStats(response.data)
+    } catch {
+      setStatsError('Could not load activity right now. Try again.')
+    } finally {
+      setStatsLoading(false)
+    }
+  }
+
+  const removeLink = async () => {
+    if (!window.confirm('Delete this short link? This cannot be undone.')) return
     setDeleting(true)
     try {
-      await axios.delete(`${API}/links/${link.shortCode}`)
-      onDelete(link.shortCode)
+      await axios.delete(API + '/links/' + encodeURIComponent(link.shortCode))
+      await onDelete(link.shortCode)
     } catch {
+      onError('The link could not be deleted. Please try again.')
       setDeleting(false)
     }
   }
 
-  const loadStats = async () => {
-    if (stats) { setShowStats(!showStats); return }
-    try {
-      const res = await axios.get(`${API}/stats/${link.shortCode}`)
-      setStats(res.data)
-      setShowStats(true)
-    } catch {}
-  }
-
   return (
-    <div style={{
-      background: 'var(--surface)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius)',
-      padding: '18px 22px',
-      transition: 'border-color 0.3s, background 0.3s',
-      animation: 'fadeUp 0.4s var(--ease) both',
-    }}
-    onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(124,92,252,0.3)'; e.currentTarget.style.background = 'var(--surface2)'; }}
-    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface)'; }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'space-between' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <a href={link.shortUrl} target="_blank" rel="noopener" style={{
-              fontFamily: 'var(--font-mono)', fontSize: '0.82rem',
-              color: 'var(--accent2)', fontWeight: 700,
-            }}>
-              {link.shortUrl.replace(/^https?:\/\//, '')}
-            </a>
-            <CopyBtn text={link.shortUrl} />
-          </div>
-          <div style={{ marginTop: 4, fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text3)' }}>
-            {truncate(link.originalUrl)}
-          </div>
-          <div style={{ marginTop: 6, display: 'flex', gap: 16, alignItems: 'center' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text3)' }}>
-              {timeAgo(link.createdAt)}
-            </span>
-            {link.expiresAt && (
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--gold)' }}>
-                ⏱ {new Date(link.expiresAt).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--accent2)', lineHeight: 1 }}>
-              {link.clicks}
-            </div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--text3)', letterSpacing: '0.1em' }}>
-              CLICKS
-            </div>
-          </div>
-
-          <button onClick={loadStats} title="View stats" style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'var(--surface2)', border: '1px solid var(--border2)',
-            cursor: 'pointer', color: 'var(--text2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.2s',
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
-            </svg>
-          </button>
-
-          <button onClick={handleDelete} disabled={deleting} title="Delete link" style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)',
-            cursor: deleting ? 'not-allowed' : 'pointer', color: 'var(--danger)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.2s', opacity: deleting ? 0.5 : 1,
-          }}>
-            {deleting ? <Spinner /> : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-              </svg>
-            )}
-          </button>
+    <article className="link-card">
+      <div className="link-card-main">
+        <div className="link-destination"><span className="destination-icon"><Icon name="globe" size={15} /></span><span title={link.originalUrl}>{hostOf(link.originalUrl)}</span></div>
+        <div className="link-card-bottom">
+          <a className="link-short" href={link.shortUrl} target="_blank" rel="noopener noreferrer">{shortAddress(link.shortUrl)} <Icon name="external" size={13} /></a>
+          <span className="link-created">{timeAgo(link.createdAt)}</span>
+          {link.expiresAt && <span className={'expiry-pill' + (expired ? ' expiry-pill--expired' : '')}><Icon name="clock" size={12} />{expired ? 'Expired' : 'Until ' + formatDate(link.expiresAt)}</span>}
         </div>
       </div>
-
-      {showStats && stats && (
-        <div style={{
-          marginTop: 16, paddingTop: 16,
-          borderTop: '1px solid var(--border)',
-          animation: 'fadeIn 0.3s var(--ease)',
-        }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--accent2)', letterSpacing: '0.15em', marginBottom: 10 }}>
-            RECENT CLICKS
-          </div>
-          {stats.recentClicks.length === 0 ? (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text3)' }}>No clicks yet.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {stats.recentClicks.map((c, i) => (
-                <div key={i} style={{ display: 'flex', gap: 16, fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--text3)' }}>
-                  <span style={{ color: 'var(--text2)' }}>{new Date(c.timestamp).toLocaleString()}</span>
-                  <span>{c.referrer || 'direct'}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+      <div className="link-card-actions">
+        <div className="click-count"><strong>{numberFormat.format(link.clicks || 0)}</strong><span>clicks</span></div>
+        <CopyButton text={link.shortUrl} onError={onError} />
+        <button className={'icon-button' + (expanded ? ' icon-button--active' : '')} type="button" onClick={toggleStats} aria-label="Toggle click activity" aria-expanded={expanded} title="Click activity"><Icon name="chart" size={17} /></button>
+        <button className="icon-button icon-button--danger" type="button" onClick={removeLink} disabled={deleting} aria-label="Delete short link" title="Delete link">{deleting ? <Spinner small /> : <Icon name="trash" size={16} />}</button>
+      </div>
+      {expanded && <ClickDetails stats={stats} loading={statsLoading} error={statsError} />}
+    </article>
   )
 }
 
+function MetricCard({ icon, label, value, detail, delay = 0 }) {
+  return <article className="metric-card" style={{ animationDelay: delay + 'ms' }}>
+    <div className="metric-top"><span className="metric-icon"><Icon name={icon} size={18} /></span><span className="metric-label">{label}</span></div>
+    <div className="metric-value">{numberFormat.format(value)}</div>
+    <div className="metric-detail">{detail}</div>
+  </article>
+}
+
 export default function App() {
+  const [tab, setTab] = useState('shorten')
   const [url, setUrl] = useState('')
   const [alias, setAlias] = useState('')
   const [expiry, setExpiry] = useState('never')
@@ -245,409 +225,188 @@ export default function App() {
   const [result, setResult] = useState(null)
   const [links, setLinks] = useState([])
   const [linksLoading, setLinksLoading] = useState(true)
-  const [tab, setTab] = useState('shorten') 
-  const inputRef = useRef(null)
+  const [linksError, setLinksError] = useState('')
+  const [filter, setFilter] = useState('')
+  const [meta, setMeta] = useState({ total: 0, totalClicks: 0, page: 1, pages: 1 })
+  const [toast, setToast] = useState(null)
+  const toastTimer = useRef(null)
+  const routeNotice = useMemo(() => {
+    const code = new URLSearchParams(window.location.search).get('error')
+    if (code === 'expired') return 'That short link has expired.'
+    if (code === 'not_found') return 'That short link could not be found.'
+    return ''
+  }, [])
 
-  useEffect(() => { loadLinks() }, [])
+  useEffect(() => { loadLinks(1) }, [])
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
-  const loadLinks = async () => {
+  const announce = (message, tone = 'success') => {
+    setToast({ message, tone })
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 3200)
+  }
+
+  const loadLinks = async (page = 1) => {
     setLinksLoading(true)
+    setLinksError('')
     try {
-      const res = await axios.get(`${API}/links?limit=20`)
-      setLinks(res.data.links || [])
+      const response = await axios.get(API + '/links', { params: { page, limit: PAGE_SIZE } })
+      const data = response.data || {}
+      setLinks(Array.isArray(data.links) ? data.links : [])
+      setMeta({
+        total: Number(data.total) || 0,
+        totalClicks: Number(data.totalClicks) || 0,
+        page: Number(data.page) || page,
+        pages: Math.max(1, Number(data.pages) || 1),
+      })
     } catch {
-      
+      setLinksError('We could not reach the link service. Check your connection and try again.')
     } finally {
       setLinksLoading(false)
     }
   }
 
-  const handleShorten = async () => {
-    if (!url.trim()) { setError('Please enter a URL'); return }
-    setError(''); setLoading(true)
-
+  const handleShorten = async (event) => {
+    event.preventDefault()
+    const originalUrl = url.trim()
+    if (!originalUrl) { setError('Add a link to get started.'); return }
+    let parsed
+    try { parsed = new URL(originalUrl) } catch { setError('Enter a complete URL, including https://'); return }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') { setError('Use a link that starts with http:// or https://'); return }
+    setError('')
+    setLoading(true)
     try {
-      const res = await axios.post(`${API}/shorten`, {
-        originalUrl: url.trim(),
+      const response = await axios.post(API + '/shorten', {
+        originalUrl,
         customAlias: alias.trim() || undefined,
         expiresIn: expiry !== 'never' ? expiry : undefined,
       })
-      setResult(res.data)
-      setUrl(''); setAlias(''); setExpiry('never')
+      setResult(response.data)
+      setUrl('')
+      setAlias('')
+      setExpiry('never')
       setShowOptions(false)
-      loadLinks()
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to shorten URL. Is the server running?')
+      announce('Your short link is ready.')
+      loadLinks(1)
+    } catch (requestError) {
+      const serverMessage = requestError.response && requestError.response.data && requestError.response.data.error
+      const messages = {
+        'Alias taken': 'That alias is already in use. Try another one.',
+        'Invalid URL': 'Check the URL and try again.',
+        'Custom alias must be 3–32 characters using letters, numbers, hyphens, or underscores.': 'Use 3–32 letters, numbers, hyphens, or underscores for the custom alias.',
+      }
+      setError(messages[serverMessage] || serverMessage || 'We could not shorten that link. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !loading) handleShorten()
+  const handleDelete = async (code) => {
+    const nextPage = links.length === 1 && meta.page > 1 ? meta.page - 1 : meta.page
+    await loadLinks(nextPage)
+    announce('Short link deleted.')
   }
 
-  const handleDelete = (code) => {
-    setLinks(prev => prev.filter(l => l.shortCode !== code))
-  }
-
-  const totalClicks = links.reduce((sum, l) => sum + l.clicks, 0)
+  const visibleLinks = useMemo(() => {
+    const query = filter.trim().toLowerCase()
+    if (!query) return links
+    return links.filter((link) => (link.originalUrl + ' ' + link.shortUrl + ' ' + link.shortCode).toLowerCase().includes(query))
+  }, [filter, links])
+  const averageClicks = meta.total ? Math.round(meta.totalClicks / meta.total) : 0
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0, overflow: 'hidden', pointerEvents: 'none',
-      }}>
-        <div style={{
-          position: 'absolute', inset: '-50%',
-          backgroundImage: 'linear-gradient(rgba(124,92,252,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(124,92,252,0.05) 1px, transparent 1px)',
-          backgroundSize: '60px 60px',
-          animation: 'gridMove 25s linear infinite',
-        }} />
-        <div style={{
-          position: 'absolute', width: 600, height: 600, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(124,92,252,0.18), transparent 70%)',
-          top: -200, right: -150,
-          animation: 'orbFloat 9s ease-in-out infinite',
-          filter: 'blur(60px)',
-        }} />
-        <div style={{
-          position: 'absolute', width: 400, height: 400, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(34,211,238,0.1), transparent 70%)',
-          bottom: 100, left: -80,
-          animation: 'orbFloat 7s ease-in-out infinite',
-          animationDelay: '-3s',
-          filter: 'blur(60px)',
-        }} />
-      </div>
-      <nav style={{
-        position: 'sticky', top: 0, zIndex: 100,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 clamp(20px, 5vw, 64px)', height: 64,
-        backdropFilter: 'blur(20px)',
-        background: 'rgba(5,5,8,0.8)',
-        borderBottom: '1px solid var(--border)',
-      }}>
-        <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
-            <path d="M14 2L24 7V21L14 26L4 21V7L14 2Z" stroke="var(--accent2)" strokeWidth="1.5" fill="none"/>
-            <path d="M14 8L20 11.5V18.5L14 22L8 18.5V11.5L14 8Z" fill="var(--accent2)" opacity="0.3"/>
-          </svg>
-          <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', letterSpacing: '0.1em', color: 'var(--accent2)', lineHeight: 1 }}>
-              MR. DARKNOVA
-            </div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.58rem', color: 'var(--text3)', letterSpacing: '0.2em' }}>
-              URL SHORTENER
-            </div>
-          </div>
+    <div className="app-shell">
+      <div className="ambient ambient--one" aria-hidden="true" />
+      <div className="ambient ambient--two" aria-hidden="true" />
+      <header className="topbar">
+        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setTab('shorten') }} aria-label="Nova Link home">
+          <span className="brand-mark"><Icon name="link" size={21} /></span>
+          <span className="brand-copy"><strong>NOVA<span>LINK</span></strong><small>SHORT LINK STUDIO</small></span>
         </a>
+        <nav className="top-nav" aria-label="Main navigation">
+          <button className={'nav-link' + (tab === 'shorten' ? ' nav-link--active' : '')} type="button" onClick={() => setTab('shorten')} aria-current={tab === 'shorten' ? 'page' : undefined}><Icon name="plus" size={15} /><span>Create link</span></button>
+          <button className={'nav-link' + (tab === 'dashboard' ? ' nav-link--active' : '')} type="button" onClick={() => setTab('dashboard')} aria-current={tab === 'dashboard' ? 'page' : undefined}><Icon name="chart" size={15} /><span>Dashboard</span>{meta.total > 0 && <span className="nav-count">{meta.total}</span>}</button>
+        </nav>
+      </header>
 
-        <div style={{ display: 'flex', gap: 4 }}>
-          {['shorten', 'dashboard'].map(t => (
-            <button key={t} onClick={() => setTab(t)} style={{
-              fontFamily: 'var(--font-mono)', fontSize: '0.72rem',
-              letterSpacing: '0.1em', textTransform: 'uppercase',
-              padding: '7px 16px', borderRadius: 8,
-              border: tab === t ? '1px solid rgba(124,92,252,0.4)' : '1px solid transparent',
-              background: tab === t ? 'var(--glow2)' : 'transparent',
-              color: tab === t ? 'var(--accent2)' : 'var(--text2)',
-              cursor: 'pointer', transition: 'all 0.25s',
-            }}>{t}</button>
-          ))}
-        </div>
-      </nav>
-      <main style={{ flex: 1, position: 'relative', zIndex: 1, padding: 'clamp(48px, 8vw, 96px) clamp(20px, 6vw, 80px)' }}>
-        {tab === 'shorten' && (
-          <div style={{ maxWidth: 760, margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: 56, animation: 'fadeUp 0.7s var(--ease) both' }}>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                fontFamily: 'var(--font-mono)', fontSize: '0.68rem',
-                letterSpacing: '0.2em', color: 'var(--accent2)',
-                background: 'var(--glow2)', border: '1px solid rgba(124,92,252,0.3)',
-                padding: '5px 14px', borderRadius: 100, marginBottom: 28,
-              }}>
-                <span style={{ width: 6, height: 6, background: 'var(--success)', borderRadius: '50%', animation: 'pulse 2s infinite' }} />
-                DARKNOVA URL SHORTENER
-              </div>
-              <h1 style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: 'clamp(3.5rem, 10vw, 8rem)',
-                lineHeight: 0.9, letterSpacing: '-0.01em',
-                marginBottom: 20,
-              }}>
-                <span style={{ display: 'block', color: 'var(--text)' }}>SHORTEN.</span>
-                <span style={{
-                  display: 'block',
-                  background: 'linear-gradient(135deg, var(--accent2) 0%, var(--cyan) 60%)',
-                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                }}>TRACK. SHARE.</span>
-              </h1>
-              <p style={{ fontFamily: 'var(--font-body)', fontSize: '1rem', color: 'var(--text2)', maxWidth: 480, margin: '0 auto' }}>
-                Transform long URLs into powerful short links. Track every click in real time.
-              </p>
-            </div>
-            <div style={{
-              display: 'flex', justifyContent: 'center', gap: 40,
-              marginBottom: 40, animation: 'fadeUp 0.7s var(--ease) 0.1s both',
-            }}>
-              {[
-                { val: links.length, label: 'LINKS' },
-                { val: totalClicks, label: 'TOTAL CLICKS' },
-              ].map(s => (
-                <div key={s.label} style={{ textAlign: 'center' }}>
-                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '2.4rem', color: 'var(--accent2)', lineHeight: 1 }}>
-                    {s.val}
-                  </div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text3)', letterSpacing: '0.15em' }}>
-                    {s.label}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div style={{
-              background: 'var(--bg2)', border: '1px solid var(--border2)',
-              borderRadius: 'var(--radius2)', padding: 'clamp(24px, 4vw, 40px)',
-              animation: 'fadeUp 0.7s var(--ease) 0.15s both',
-              boxShadow: '0 20px 80px rgba(0,0,0,0.3)',
-            }}>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <div style={{
-                    position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text3)',
-                  }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                    </svg>
-                  </div>
-                  <input
-                    ref={inputRef}
-                    type="url"
-                    value={url}
-                    onChange={e => { setUrl(e.target.value); setError('') }}
-                    onKeyDown={handleKeyDown}
-                    placeholder="https://your-long-url.com/paste-here"
-                    style={{
-                      width: '100%', padding: '14px 16px 14px 44px',
-                      background: 'var(--surface2)', border: `1px solid ${error ? 'var(--danger)' : 'var(--border2)'}`,
-                      borderRadius: 'var(--radius)', color: 'var(--text)',
-                      fontFamily: 'var(--font-mono)', fontSize: '0.82rem',
-                      outline: 'none', transition: 'border-color 0.2s',
-                    }}
-                    onFocus={e => { if (!error) e.target.style.borderColor = 'rgba(124,92,252,0.5)' }}
-                    onBlur={e => { if (!error) e.target.style.borderColor = 'var(--border2)' }}
-                  />
-                </div>
-                <button
-                  onClick={handleShorten}
-                  disabled={loading}
-                  style={{
-                    padding: '14px 28px',
-                    background: loading ? 'rgba(124,92,252,0.4)' : 'linear-gradient(135deg, var(--accent), var(--accent2))',
-                    border: 'none', borderRadius: 'var(--radius)',
-                    color: '#fff', cursor: loading ? 'not-allowed' : 'pointer',
-                    fontFamily: 'var(--font-mono)', fontSize: '0.8rem',
-                    letterSpacing: '0.08em',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    boxShadow: '0 4px 24px var(--glow)',
-                    transition: 'all 0.25s', whiteSpace: 'nowrap',
-                  }}
-                >
-                  {loading ? <><Spinner /> SHORTENING</> : <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                    </svg>
-                    SHORTEN
-                  </>}
-                </button>
-              </div>
-              {error && (
-                <div style={{
-                  marginTop: 10, padding: '10px 14px',
-                  background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)',
-                  borderRadius: 10, fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--danger)',
-                  animation: 'fadeIn 0.3s var(--ease)',
-                }}>
-                  {error}
-                </div>
-              )}
-              <button
-                onClick={() => setShowOptions(!showOptions)}
-                style={{
-                  marginTop: 14, background: 'none', border: 'none',
-                  cursor: 'pointer', color: 'var(--text3)',
-                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
-                  letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: 6,
-                  transition: 'color 0.2s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.color = 'var(--accent2)'}
-                onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  style={{ transform: showOptions ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s' }}>
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-                {showOptions ? 'HIDE OPTIONS' : 'ADVANCED OPTIONS'}
-              </button>
-              {showOptions && (
-                <div style={{
-                  marginTop: 16, display: 'grid',
-                  gridTemplateColumns: '1fr 1fr', gap: 12,
-                  animation: 'fadeUp 0.3s var(--ease)',
-                }}>
-                  <div>
-                    <label style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text3)', letterSpacing: '0.15em', display: 'block', marginBottom: 8 }}>
-                      CUSTOM ALIAS
-                    </label>
-                    <input
-                      type="text"
-                      value={alias}
-                      onChange={e => setAlias(e.target.value)}
-                      placeholder="my-brand-link"
-                      style={{
-                        width: '100%', padding: '11px 14px',
-                        background: 'var(--surface)', border: '1px solid var(--border2)',
-                        borderRadius: 'var(--radius)', color: 'var(--text)',
-                        fontFamily: 'var(--font-mono)', fontSize: '0.78rem',
-                        outline: 'none',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--text3)', letterSpacing: '0.15em', display: 'block', marginBottom: 8 }}>
-                      EXPIRY
-                    </label>
-                    <select
-                      value={expiry}
-                      onChange={e => setExpiry(e.target.value)}
-                      style={{
-                        width: '100%', padding: '11px 14px',
-                        background: 'var(--surface)', border: '1px solid var(--border2)',
-                        borderRadius: 'var(--radius)', color: 'var(--text)',
-                        fontFamily: 'var(--font-mono)', fontSize: '0.78rem',
-                        outline: 'none', cursor: 'pointer',
-                      }}
-                    >
-                      <option value="never">Never expires</option>
-                      <option value="1">1 day</option>
-                      <option value="7">7 days</option>
-                      <option value="30">30 days</option>
-                      <option value="90">90 days</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-            {result && (
-              <div style={{ marginTop: 20 }}>
-                <ResultCard result={result} onClose={() => setResult(null)} />
-              </div>
-            )}
-            <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14,
-              marginTop: 48, animation: 'fadeUp 0.7s var(--ease) 0.25s both',
-            }}>
-              {[
-                { icon: '⚡', title: 'Instant Shortening', desc: 'URLs shortened in milliseconds with a single click.' },
-                { icon: '📊', title: 'Click Analytics', desc: 'Track clicks, referrers, and activity per link.' },
-                { icon: '🔒', title: 'Custom Aliases', desc: 'Brand your links with memorable custom slugs.' },
-              ].map(f => (
-                <div key={f.title} style={{
-                  background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)', padding: '20px',
-                  transition: 'border-color 0.3s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(124,92,252,0.3)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-                >
-                  <div style={{ fontSize: '1.4rem', marginBottom: 10 }}>{f.icon}</div>
-                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--text)', letterSpacing: '0.05em', marginBottom: 6 }}>
-                    {f.title}
-                  </div>
-                  <div style={{ fontFamily: 'var(--font-body)', fontSize: '0.82rem', color: 'var(--text3)', lineHeight: 1.6 }}>
-                    {f.desc}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {tab === 'dashboard' && (
-          <div style={{ maxWidth: 900, margin: '0 auto' }}>
-            <div style={{ marginBottom: 40, animation: 'fadeUp 0.5s var(--ease) both' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--accent2)', letterSpacing: '0.2em', marginBottom: 10 }}>
-                YOUR LINKS
-              </div>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(2.5rem, 6vw, 4.5rem)', color: 'var(--text)', lineHeight: 1 }}>
-                LINK <span style={{ background: 'linear-gradient(135deg, var(--accent2), var(--cyan))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>DASHBOARD</span>
-              </h2>
-              <div style={{ display: 'flex', gap: 24, marginTop: 24, flexWrap: 'wrap' }}>
-                {[
-                  { label: 'TOTAL LINKS', val: links.length },
-                  { label: 'TOTAL CLICKS', val: totalClicks },
-                  { label: 'AVG. CLICKS', val: links.length ? Math.round(totalClicks / links.length) : 0 },
-                ].map(s => (
-                  <div key={s.label} style={{
-                    background: 'var(--surface)', border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius)', padding: '16px 24px',
-                  }}>
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', color: 'var(--accent2)', lineHeight: 1 }}>{s.val}</div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--text3)', letterSpacing: '0.15em', marginTop: 4 }}>{s.label}</div>
-                  </div>
-                ))}
+      <main className="page-content">
+        {routeNotice && <div className="route-notice" role="status"><Icon name="info" size={17} />{routeNotice}</div>}
+        {tab === 'shorten' ? <>
+          <section className="hero-grid">
+            <div className="hero-copy">
+              <div className="eyebrow"><span className="eyebrow-line" /> LESS URL. MORE YOU.</div>
+              <h1>Make every<br /><span>link count.</span></h1>
+              <p className="hero-description">Turn long links into something worth sharing. Create, customize, and keep an eye on every click.</p>
+              <div className="hero-points">
+                <div><span className="point-icon"><Icon name="bolt" size={16} /></span><span>Short links, instantly</span></div>
+                <div><span className="point-icon"><Icon name="chart" size={16} /></span><span>Click activity at a glance</span></div>
               </div>
             </div>
 
-            {linksLoading ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text3)' }}>
-                <Spinner /> Loading links...
+            <section className="shorten-card" aria-labelledby="create-heading">
+              <div className="card-heading">
+                <div><span className="card-overline">START WITH A URL</span><h2 id="create-heading">Create a short link</h2></div>
+                <span className="card-icon"><Icon name="spark" size={21} /></span>
               </div>
-            ) : links.length === 0 ? (
-              <div style={{
-                textAlign: 'center', padding: '60px 20px',
-                background: 'var(--surface)', border: '1px dashed var(--border2)',
-                borderRadius: 'var(--radius2)',
-              }}>
-                <div style={{ fontSize: '3rem', marginBottom: 16 }}>🔗</div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.8rem', color: 'var(--text2)', marginBottom: 8 }}>
-                  NO LINKS YET
+              <form onSubmit={handleShorten} noValidate>
+                <label className="field-label" htmlFor="long-url">Paste your long link</label>
+                <div className={'url-input-wrap' + (error ? ' url-input-wrap--error' : '')}>
+                  <Icon name="link" size={18} />
+                  <input id="long-url" className="url-input" type="url" inputMode="url" autoComplete="url" placeholder="https://example.com/your-long-link" value={url} onChange={(event) => { setUrl(event.target.value); if (error) setError('') }} aria-invalid={!!error} aria-describedby={error ? 'url-error' : 'url-helper'} />
+                  {url && <button className="clear-input" type="button" onClick={() => { setUrl(''); setError('') }} aria-label="Clear URL"><Icon name="close" size={16} /></button>}
                 </div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text3)', marginBottom: 20 }}>
-                  Go shorten your first URL to get started
-                </div>
-                <button onClick={() => setTab('shorten')} style={{
-                  padding: '11px 24px',
-                  background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
-                  border: 'none', borderRadius: 'var(--radius)',
-                  color: '#fff', cursor: 'pointer',
-                  fontFamily: 'var(--font-mono)', fontSize: '0.78rem',
-                  letterSpacing: '0.08em',
-                }}>
-                  SHORTEN A URL
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {links.map(link => (
-                  <LinkRow key={link.shortCode} link={link} onDelete={handleDelete} />
-                ))}
-              </div>
-            )}
+                {error ? <div className="form-error" id="url-error" role="alert">{error}</div> : <div className="field-hint" id="url-helper">Your destination stays exactly as you entered it.</div>}
+                <button className="advanced-toggle" type="button" onClick={() => setShowOptions(!showOptions)} aria-expanded={showOptions} aria-controls="advanced-options"><span className="advanced-toggle-left"><Icon name="spark" size={15} /> Make it yours</span><span className="advanced-toggle-right">{showOptions ? 'Hide options' : 'Custom alias & expiry'}<Icon name="chevron" size={15} className={showOptions ? 'rotate-180' : ''} /></span></button>
+                {showOptions && <div className="advanced-fields" id="advanced-options">
+                  <div className="field-group"><label className="field-label" htmlFor="custom-alias">Custom alias <span className="optional-label">OPTIONAL</span></label><div className="text-input-wrap"><span className="input-prefix">/</span><input id="custom-alias" className="text-input" type="text" autoComplete="off" maxLength={32} placeholder="your-name" value={alias} onChange={(event) => setAlias(event.target.value)} /></div><span className="field-hint">3–32 letters, numbers, - or _</span></div>
+                  <div className="field-group"><label className="field-label" htmlFor="expiry">Link expiry</label><select id="expiry" className="select-input" value={expiry} onChange={(event) => setExpiry(event.target.value)}><option value="never">Never expires</option><option value="1">After 1 day</option><option value="7">After 7 days</option><option value="30">After 30 days</option><option value="90">After 90 days</option></select><span className="field-hint">Choose how long it stays active.</span></div>
+                </div>}
+                <button className="button-primary create-button" type="submit" disabled={loading || !url.trim()}>{loading ? <><Spinner small /> Creating your link…</> : <>Create short link <Icon name="arrow" size={17} /></>}</button>
+              </form>
+              <div className="privacy-note"><Icon name="shield" size={14} /><span>Your links, ready to share. No account required.</span></div>
+            </section>
+          </section>
+
+          <ResultCard result={result} onError={(message) => announce(message, 'error')} onDismiss={() => setResult(null)} />
+
+          <section className="overview-strip" aria-label="Link overview">
+            <div className="overview-intro"><span className="overview-label">YOUR LINK ACTIVITY</span><span className="overview-subtitle">A quick look at your workspace</span></div>
+            <div className="overview-stat"><span className="overview-stat-icon"><Icon name="link" size={17} /></span><span className="overview-stat-value">{numberFormat.format(meta.total)}</span><span className="overview-stat-label">links created</span></div>
+            <div className="overview-divider" />
+            <div className="overview-stat"><span className="overview-stat-icon overview-stat-icon--mint"><Icon name="chart" size={17} /></span><span className="overview-stat-value">{numberFormat.format(meta.totalClicks)}</span><span className="overview-stat-label">total clicks</span></div>
+            <button className="overview-link" type="button" onClick={() => setTab('dashboard')}>View dashboard <Icon name="arrow" size={15} /></button>
+          </section>
+
+          <section className="benefit-grid" aria-label="Why Nova Link">
+            <article className="benefit-card"><span className="benefit-icon benefit-icon--violet"><Icon name="bolt" size={19} /></span><h3>Fast by default</h3><p>Go from a sprawling URL to a clean, shareable link in a moment.</p></article>
+            <article className="benefit-card"><span className="benefit-icon benefit-icon--mint"><Icon name="chart" size={19} /></span><h3>Know what lands</h3><p>See click totals and recent activity for every link you create.</p></article>
+            <article className="benefit-card"><span className="benefit-icon benefit-icon--blue"><Icon name="spark" size={19} /></span><h3>Make it memorable</h3><p>Add a custom alias and set an expiry when the link is temporary.</p></article>
+          </section>
+        </> : <section className="dashboard-view">
+          <div className="dashboard-heading">
+            <div><div className="eyebrow"><span className="eyebrow-line" /> YOUR WORKSPACE</div><h1>Your links,<br /><span>in one place.</span></h1><p>Manage every short link and see how it’s performing.</p></div>
+            <button className="button-primary dashboard-create" type="button" onClick={() => { setTab('shorten'); setResult(null) }}><Icon name="plus" size={17} /> Create a link</button>
           </div>
-        )}
+
+          <div className="metrics-grid">
+            <MetricCard icon="link" label="TOTAL LINKS" value={meta.total} detail="Active short links" delay={0} />
+            <MetricCard icon="chart" label="TOTAL CLICKS" value={meta.totalClicks} detail="Across all your links" delay={60} />
+            <MetricCard icon="spark" label="AVG. CLICKS" value={averageClicks} detail="Clicks per link" delay={120} />
+          </div>
+
+          <section className="links-section" aria-labelledby="links-heading">
+            <div className="links-section-head"><div><div className="section-overline">YOUR COLLECTION</div><h2 id="links-heading">All links <span className="section-count">{numberFormat.format(meta.total)}</span></h2></div><button className="icon-button refresh-button" type="button" onClick={() => loadLinks(meta.page)} disabled={linksLoading} aria-label="Refresh links" title="Refresh"><Icon name="refresh" size={17} /></button></div>
+            <div className="links-toolbar"><div className="search-box"><Icon name="search" size={17} /><input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter this page…" aria-label="Filter links on this page" /></div><div className="toolbar-caption">{meta.total === 0 ? 'No links yet' : 'Page ' + meta.page + ' of ' + meta.pages}</div></div>
+            {linksError && links.length > 0 && <div className="inline-alert" role="alert"><span>{linksError}</span><button type="button" onClick={() => loadLinks(meta.page)}>Retry</button></div>}
+            {linksLoading && links.length === 0 ? <div className="loading-panel"><Spinner /><span>Loading your links…</span></div> : linksError && links.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="refresh" size={23} /></span><h3>Your links didn’t load.</h3><p>Check your connection and try again. Your links are still safe.</p><button className="button-secondary" type="button" onClick={() => loadLinks(meta.page)}>Try again <Icon name="refresh" size={14} /></button></div> : visibleLinks.length > 0 ? <div className="link-list">{visibleLinks.map((link) => <LinkCard key={link.shortCode} link={link} onDelete={handleDelete} onError={(message) => announce(message, 'error')} />)}</div> : filter ? <div className="empty-state"><span className="empty-icon"><Icon name="search" size={23} /></span><h3>No matches on this page</h3><p>Try another search, or move to a different page.</p><button className="button-secondary" type="button" onClick={() => setFilter('')}>Clear filter</button></div> : linksLoading ? <div className="loading-panel"><Spinner /><span>Refreshing your links…</span></div> : <div className="empty-state"><span className="empty-icon"><Icon name="link" size={23} /></span><h3>Your next great link starts here.</h3><p>Create your first short link and it’ll show up here.</p><button className="button-secondary" type="button" onClick={() => setTab('shorten')}>Create a short link <Icon name="arrow" size={15} /></button></div>}
+            {meta.pages > 1 && <div className="pagination"><span>Showing {links.length ? ((meta.page - 1) * PAGE_SIZE + 1) : 0}–{Math.min(meta.page * PAGE_SIZE, meta.total)} of {numberFormat.format(meta.total)}</span><div className="pagination-actions"><button className="button-secondary pagination-button" type="button" onClick={() => loadLinks(meta.page - 1)} disabled={linksLoading || meta.page <= 1}><Icon name="arrow" size={15} className="arrow-reverse" /> Previous</button><button className="button-secondary pagination-button" type="button" onClick={() => loadLinks(meta.page + 1)} disabled={linksLoading || meta.page >= meta.pages}>Next <Icon name="arrow" size={15} /></button></div></div>}
+          </section>
+        </section>}
       </main>
-      <footer style={{
-        position: 'relative', zIndex: 1,
-        textAlign: 'center', padding: '24px 20px',
-        borderTop: '1px solid var(--border)',
-        fontFamily: 'var(--font-mono)', fontSize: '0.65rem',
-        color: 'var(--text3)', letterSpacing: '0.1em',
-      }}>
-        CRAFTED BY <span style={{ color: 'var(--accent2)' }}>MR. DARKNOVA</span> — VICTOR KUMBA · {new Date().getFullYear()}
-      </footer>
+
+      <footer className="site-footer"><a className="footer-brand" href="/" onClick={(event) => { event.preventDefault(); setTab('shorten') }}><span className="brand-mark brand-mark--small"><Icon name="link" size={16} /></span><span>NOVA LINK</span></a><span className="footer-note">A little less link. A lot more focus.</span><span className="footer-credit">BY MR. DARKNOVA</span></footer>
+
+      {toast && <div className={'toast toast--' + toast.tone} role={toast.tone === 'error' ? 'alert' : 'status'}><span className="toast-icon"><Icon name={toast.tone === 'error' ? 'close' : 'check'} size={16} /></span>{toast.message}<button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><Icon name="close" size={15} /></button></div>}
     </div>
   )
 }

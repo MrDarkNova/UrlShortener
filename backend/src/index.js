@@ -15,7 +15,7 @@ app.use(cors({
   origin: [
     'https://urlshortener.mrdarknova.indevs.in',
     process.env.FRONTEND_URL,
-  ],
+  ].filter(Boolean),
   methods: ['GET', 'POST', 'DELETE'],
 }));
 
@@ -38,27 +38,31 @@ app.use('/api', urlRoutes);
 app.get('/:code', async (req, res) => {
   try {
     const { code } = req.params;
-    if (['favicon.ico', 'robots.txt', 'sitemap.xml'].includes(code)) {
-      return res.status(404).end();
-    }
+    if (['favicon.ico', 'robots.txt', 'sitemap.xml'].includes(code)) return res.status(404).end();
+
     const url = await Url.findOne({ shortCode: code, isActive: true });
-    if (!url) {
-      return res.redirect(`${process.env.FRONTEND_URL}/?error=not_found`);
-    }
+    if (!url) return res.redirect((process.env.FRONTEND_URL || '/') + '?error=not_found');
     if (url.expiresAt && new Date() > url.expiresAt) {
-      return res.redirect(`${process.env.FRONTEND_URL}/?error=expired`);
+      return res.redirect((process.env.FRONTEND_URL || '/') + '?error=expired');
     }
+
     await Url.findByIdAndUpdate(url._id, {
       $inc: { clicks: 1 },
       $push: {
         clickData: {
-          timestamp: new Date(),
-          referrer: req.get('referrer') || 'direct',
-          userAgent: req.get('user-agent') || '',
+          $each: [{
+            timestamp: new Date(),
+            referrer: req.get('referer') || 'direct',
+            userAgent: req.get('user-agent') || '',
+          }],
+          $slice: -500,
         },
       },
     });
-    res.redirect(301, url.originalUrl);
+
+    // A permanent redirect can be cached by clients and proxies, hiding later clicks from analytics.
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.redirect(302, url.originalUrl);
   } catch (err) {
     console.error('Redirect error:', err);
     res.status(500).send('Server error');
@@ -66,17 +70,17 @@ app.get('/:code', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ status: 'DarkNova URL Shortener API is running 🚀', version: '1.0.0' });
+  res.json({ status: 'Nova Link API is running', version: '1.0.0' });
 });
 
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/darknova-urls')
   .then(() => {
-    console.log('✅ MongoDB connected');
+    console.log('MongoDB connected');
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 DarkNova URL API running on port ${PORT}`);
+      console.log('Nova Link API running on port ' + PORT);
     });
   })
-  .catch(err => {
-    console.error('❌ MongoDB connection failed:', err.message);
+  .catch((err) => {
+    console.error('MongoDB connection failed:', err.message);
     process.exit(1);
   });
